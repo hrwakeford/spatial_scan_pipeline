@@ -417,8 +417,6 @@ def convert_rows_to_wv(direct_file, grism_file, rows):
     """ Converts the rows to wavelength bins. 
     Parameters
     ----------
-    grism : str
-        either 'G102' or 'G141'
     direct_file : str
         The path to the direct file.
     grism_file : str
