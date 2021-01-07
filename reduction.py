@@ -19,7 +19,7 @@ matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.ma as ma
-from photutils import daofind
+from photutils import DAOStarFinder
 
 ## -- FUNCTIONS
 
@@ -415,21 +415,23 @@ def find_cosmic_rays(time_col):
 
 def convert_rows_to_wv(direct_file, grism_file, rows):
     """ Converts the rows to wavelength bins. 
-
     Parameters
     ----------
+    grism : str
+        either 'G102' or 'G141'
     direct_file : str
         The path to the direct file.
     grism_file : str
         The path to the grism file.
     rows : array
         The array of rows that correspond to the spatial scan.
-
     Returns
     ------
     wv : array
         The array solution for for wavelength.
     """
+    # if (grism != 'G102' or grism !='G141'): 
+        # raise ValueError('Grism input is not valid use either G102 or G141')
 
     # Collect data from FITS headers
     with fits.open(grism_file) as hdu:
@@ -439,6 +441,10 @@ def convert_rows_to_wv(direct_file, grism_file, rows):
         sci_postarg_2 = hdr['POSTARG2']
         sci_crpix_1 = hdr1['CRPIX1'] # this isn't a real keyword...
         sci_crpix_2 = hdr1['CRPIX2'] 
+        # This finds if it should use the G102 or G141 wavelength function
+        grism = hdr['FILTER'] 
+        if (grism != 'G102' and grism != 'G141'): 
+            raise ValueError('Grism input file is not from G102 or G141')
 
     with fits.open(direct_file) as hdu:
         hdr = hdu[0].header
@@ -451,25 +457,37 @@ def convert_rows_to_wv(direct_file, grism_file, rows):
 
 
     # Find the central source
-    mean, med, std = sigma_clipped_stats(data, sigma=3.0, iters=5)
-    sources = daofind(data-med, fwhm=3.0, threshold=5.*std)
+    mean, med, std = sigma_clipped_stats(data, sigma=3.0)
+    daofind = DAOStarFinder(fwhm=3.0, threshold=5.*std)  
+    sources = daofind(data - med)
     
     source = sources[np.where(sources['flux'] == np.max(sources['flux']))]
     x_cen, y_cen = source['xcentroid'], source['ycentroid']
 
 
     # Calculate the offset
+    # The 0.135 and 0.121 correspond to the pixel size on the detector 
+    # see https://www.stsci.edu/files/live/sites/www/files/home/hst/instrumentation/wfc3/_documents/wfc3_ihb.pdf page 137
     x_offset = sci_crpix_1 - cal_crpix_1 + (sci_postarg_1 - cal_postarg_1)/0.135
     y_offset = sci_crpix_2 - cal_crpix_2 + (sci_postarg_2 - cal_postarg_2)/0.121
 
     pos_x, pos_y = x_cen + x_offset, y_cen + y_offset
 
-    constants_0 = [8.95E3, 9.35925E-2, 0.0, 0.0, 0.0, 0.0]
-    constants_1 = [4.51423E1, 3.17239E-4, 2.17055E-3, -7.42504E-7, 3.4863E-7, 3.09213E-7]
+    if (grism == 'G102'):
+        # Values from Table 5 of ST-ECF Technical Instrument Report WFC3-2009-18
+        constants_0 = [6.38738E3, 4.55507E-2, 0.0, 0.0, 0.0]
+        constants_1 = [2.35716E1, 3.60396E-4, 1.58739E-3, -4.25234E-7, -6.52726E-8]
 
-    coords_0 = constants_0[0] + constants_0[1]*pos_x + constants_0[2]*pos_y
-    coords_1 = constants_1[0] + constants_1[1]*pos_x + constants_1[2]*pos_y + constants_1[3]*pos_x**2 + constants_1[4]*pos_x*pos_y + constants_1[5]*pos_y**2
+        coords_0 = constants_0[0] + constants_0[1]*pos_x + constants_0[2]*pos_y
+        coords_1 = constants_1[0] + constants_1[1]*pos_x + constants_1[2]*pos_y + constants_1[3]*pos_x**2 + constants_1[4]*pos_x*pos_y 
     
+    if (grism == 'G141'):
+        constants_0 = [8.95E3, 9.35925E-2, 0.0, 0.0, 0.0, 0.0]
+        constants_1 = [4.51423E1, 3.17239E-4, 2.17055E-3, -7.42504E-7, 3.4863E-7, 3.09213E-7]
+
+        coords_0 = constants_0[0] + constants_0[1]*pos_x + constants_0[2]*pos_y
+        coords_1 = constants_1[0] + constants_1[1]*pos_x + constants_1[2]*pos_y + constants_1[3]*pos_x**2 + constants_1[4]*pos_x*pos_y + constants_1[5]*pos_y**2
+
     wv = coords_0 + coords_1*(rows-pos_x) + pos_y
 
     return wv
